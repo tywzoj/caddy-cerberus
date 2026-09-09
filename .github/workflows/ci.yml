@@ -6,13 +6,13 @@ on:
   pull_request:
     branches: ["main"]
   workflow_call:
-    secrets:
-      CACHIX_AUTH_TOKEN:
-        required: false
     outputs:
       caddy-version:
         description: Validated Caddy version
         value: ${{ jobs.build.outputs.caddy-version }}
+      package-path:
+        description: Validated package output path
+        value: ${{ jobs.build.outputs.package-path }}
 
 permissions:
   contents: read
@@ -23,7 +23,6 @@ jobs:
     outputs:
       caddy-version: ${{ steps.verify.outputs.caddy-version }}
       package-path: ${{ steps.verify.outputs.package-path }}
-      cache-published: ${{ steps.publish.outputs.cache-published }}
     defaults:
       run:
         shell: bash
@@ -42,7 +41,6 @@ jobs:
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: ${{ vars.CACHIX_CACHE }}
-          authToken: ${{ github.event_name != 'pull_request' && secrets.CACHIX_AUTH_TOKEN || '' }}
           skipPush: true
 
       - name: Check flake and package invariants
@@ -66,54 +64,6 @@ jobs:
           echo "caddy-version=$expected" >> "$GITHUB_OUTPUT"
           echo "package-path=$(readlink -f result)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish validated package to optional Cachix cache
-        id: publish
-        if: github.event_name != 'pull_request' && vars.CACHIX_CACHE != ''
-        env:
-          CACHIX_CACHE: ${{ vars.CACHIX_CACHE }}
-          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: |
-          if [[ -n "$CACHIX_AUTH_TOKEN" ]]; then
-            cachix push "$CACHIX_CACHE" "$(readlink -f result)"
-            echo "cache-published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::No CACHIX_AUTH_TOKEN configured; skipping cache publication."
-          fi
-
       - name: Report failure
         if: failure()
         run: echo "::error::Caddy/Cerberus build or validation failed. See the failing step and Nix build logs above."
-
-  verify-cache:
-    needs: build
-    if: needs.build.outputs.cache-published == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Configure public cache without credentials
-        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
-        with:
-          name: ${{ vars.CACHIX_CACHE }}
-          skipPush: true
-
-      - name: Download and verify the published package without building
-        env:
-          PACKAGE_PATH: ${{ needs.build.outputs.package-path }}
-          EXPECTED_CADDY_VERSION: ${{ needs.build.outputs.caddy-version }}
-        shell: bash
-        run: |
-          test ! -e "$PACKAGE_PATH"
-          nix-store --realise "$PACKAGE_PATH" \
-            --option max-jobs 0 --option builders "" --option fallback false
-          nix-store --verify-path "$PACKAGE_PATH"
-          version="$("$PACKAGE_PATH/bin/caddy" version)"
-          reported="${version%% *}"
-          test "${reported#v}" = "$EXPECTED_CADDY_VERSION"
-          "$PACKAGE_PATH/bin/caddy" list-modules > "$RUNNER_TEMP/modules"
-          grep -Fx 'cerberus' "$RUNNER_TEMP/modules"
-          grep -Fx 'http.handlers.cerberus' "$RUNNER_TEMP/modules"
-          grep -Fx 'http.handlers.cerberus_endpoint' "$RUNNER_TEMP/modules"

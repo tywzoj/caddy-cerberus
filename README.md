@@ -204,20 +204,26 @@ To enable an optional **public Cachix cache**:
 2. Set the GitHub repository Actions variable `CACHIX_CACHE` to its name.
 3. Set the Actions secret `CACHIX_AUTH_TOKEN` to a cache-scoped write token.
 
-CI can pull from the configured public cache without a token. Only non-PR
-builds with a token push, and only **after validation succeeds**. Fork PRs never
-receive cache credentials and never publish. Missing credentials skip
-publication rather than failing the build; an attempted push failure fails
-the job. Hosted Cachix signing is used; do not commit signing keys or tokens.
-If you later use a self-managed signing key, keep it in Actions secrets too.
+CI only builds and validates: it can pull from the configured public cache
+without a token, but never receives cache write credentials or publishes,
+including on pushes to `main` and when called by Release. Only the tag-triggered
+**Release** workflow publishes, and only **after validation succeeds**. Its
+dedicated `publish-cache` job realises the same package from the tagged commit
+and checks its output path against CI's validated output before pushing. The
+write token is provided only to that publishing step, not to build commands.
+Missing credentials skip publication rather than failing the release; an
+attempted push failure blocks release creation. Hosted Cachix signing is used;
+do not commit signing keys or tokens. If you later use a self-managed signing
+key, keep it in Actions secrets too.
 
-After a successful push, a separate `verify-cache` job starts on a fresh runner
-without checkout, a write token, or a preinstalled copy of the custom package.
+After a successful cache push, Release's separate `verify-cache` job starts on
+a fresh runner without checkout, a write token, or a preinstalled copy of the custom package.
 It fetches the exact output path from the build job, with local and remote
 builders disabled, verifies the installed store path, and runs the downloaded
-binary's version/module checks. A missing closure or download failure fails CI
-and blocks a tag release. If publication is skipped, this job is also skipped:
-that is **not** proof that the package is available from a cache.
+binary's version/module checks. A missing closure or download failure blocks
+release creation. If publication is skipped, this job is also skipped and the
+GitHub Release can still be created: that is **not** proof that the package is
+available from a cache.
 
 Configure production Nix with the cache's URL and **public** signing key from
 the Cachix dashboard, retaining the default substituter/key:
@@ -234,9 +240,10 @@ production server. Private caches additionally need read-only authentication
 and are not covered by this public-cache setup.
 
 ```text
-Git push/tag -> GitHub Actions -> nix build + checks -> Cachix
-                                                         |
-                                      server nix profile installation
+PR / main push -> CI -> build + checks (read-only cache access)
+Release tag -> CI validation -> publish-cache -> verify-cache -> GitHub Release
+                                    |
+                                  Cachix -> server installation
 ```
 
 The workflows do not upload raw `/nix/store` contents or Nix closures as
@@ -249,12 +256,14 @@ GitHub Actions artifacts or release assets.
   Feature-branch pushes do not trigger a separate CI run. `workflow_call`
   remains available for the tag release workflow.
   It installs Nix, enables `nix-command flakes`, optionally
-  configures Cachix, runs `nix flake check` and `nix build`, and verifies the
-  resulting binary. `--no-update-lock-file` prevents CI from silently changing
+  configures read-only Cachix access, runs `nix flake check` and `nix build`, and
+  verifies the resulting binary. It never publishes or accepts cache write
+  credentials. `--no-update-lock-file` prevents CI from silently changing
   the dependency lock. Nix build logs and a failure annotation identify errors.
 - **Release** (`.github/workflows/release.yml`) runs for tags matching
-  `v*.*.*`, such as `v1.0.0`. It reuses the CI job, including validation and
-  optional cache publishing, then creates a GitHub Release containing the
+  `v*.*.*`, such as `v1.0.0`. It calls CI for validation without passing secrets,
+  then runs its own optional cache publication and download verification jobs.
+  Finally it creates a GitHub Release containing the
   package release version, Caddy version, supported system, and installation
   command. A failed build/check/cache push/download verification prevents release creation.
   No tags need to be created until releases are wanted.
@@ -267,12 +276,12 @@ Use a test server before production; the workflow cannot verify a server it
 cannot access. Do not treat these steps as already completed:
 
 1. Review and merge the intended commit. Confirm its CI checks, including the
-   HTTP runtime check, pass. For download-only deployment, also require a
-   successful `verify-cache` job, not a skipped job.
+   HTTP runtime check, pass. Ordinary CI does not populate the cache.
 2. Choose an unused release version and tag that exact reviewed commit. Push
    the tag only when ready to publish; the existing release workflow repeats
    validation and creates the release after success. Merely passing branch CI
-   does not publish a release.
+   does not publish a release or cache. For download-only deployment, require
+   a successful `verify-cache` job in this release run, not a skipped job.
 3. On a clean test server configured with the public cache, install that exact
    tag using the download-only systemd instructions above. Record the commit,
    resolved store path, service status, and configuration revision.
@@ -325,8 +334,10 @@ not change `flake.lock`; all nixpkgs changes require a regenerated lock.
 
 ### Deploying an approved update
 
-After reviewing and merging an update, let CI populate the cache before
-updating the server. Use `nix profile list` to find the installed entry.
+After reviewing and merging an update, publish a reviewed release tag and wait
+for Release's cache publication and download verification before a download-only
+server update. Ordinary CI does not populate the cache.
+Use `nix profile list` to find the installed entry.
 For an entry following the repository's default branch, explicitly run
 `nix profile upgrade <ENTRY>` when ready. A tag/commit-pinned entry does not
 track newer releases: deliberately replace it with the next reviewed tag or
