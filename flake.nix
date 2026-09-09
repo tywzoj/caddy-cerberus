@@ -15,7 +15,7 @@
           "Review the Caddy version before updating nixpkgs.";
         pkgs.caddy.withPlugins {
           plugins = [ "github.com/sjtug/cerberus@${cerberusVersion}" ];
-          hash = pkgs.lib.fakeHash;
+          hash = "sha256-rl4DBin/m3jxgi9da6bwp+0gBf2S5x7So3sCxvPsw8w=";
         };
     in
     {
@@ -29,17 +29,18 @@
       } ''
         version="$(caddy version)"
         echo "$version"
-        case "$version" in
-          v${expectedCaddyVersion}|v${expectedCaddyVersion}\ *) ;;
-          *) echo "Expected Caddy v${expectedCaddyVersion}, got: $version" >&2; exit 1 ;;
-        esac
+        reported="''${version%% *}"
+        if [ "''${reported#v}" != "${expectedCaddyVersion}" ]; then
+          echo "Expected Caddy ${expectedCaddyVersion}, got: $version" >&2
+          exit 1
+        fi
 
-        caddy build-info > build-info
-        cat build-info
+        caddy build-info > build-info.txt
+        cat build-info.txt
         awk '$1 == "dep" && $2 == "github.com/caddyserver/caddy/v2" && $3 == "v${expectedCaddyVersion}" { found = 1 }
-          END { exit !found }' build-info
+          END { exit !found }' build-info.txt
         awk '$1 == "dep" && $2 == "github.com/sjtug/cerberus" && $3 == "${cerberusVersion}" { found = 1 }
-          END { exit !found }' build-info
+          END { exit !found }' build-info.txt
 
         caddy list-modules > modules
         grep -i cerberus modules

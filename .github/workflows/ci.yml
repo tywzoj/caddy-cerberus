@@ -54,10 +54,11 @@ jobs:
           expected="$(nix eval --raw .#packages.x86_64-linux.caddy-cerberus.version)"
           version="$(./result/bin/caddy version)"
           echo "$version"
-          case "$version" in
-            "v$expected"|"v$expected "*) ;;
-            *) echo "::error::Expected Caddy v$expected, got: $version"; exit 1 ;;
-          esac
+          reported="${version%% *}"
+          if [[ "${reported#v}" != "$expected" ]]; then
+            echo "::error::Expected Caddy $expected, got: $version"
+            exit 1
+          fi
           ./result/bin/caddy list-modules | grep -i cerberus
           echo "caddy-version=$expected" >> "$GITHUB_OUTPUT"
 
