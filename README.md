@@ -129,8 +129,11 @@ GitHub Actions artifacts or release assets.
 
 ## GitHub Actions and releases
 
-- **CI** (`.github/workflows/ci.yml`) runs on branch pushes and pull requests,
-  on `ubuntu-latest`. It installs Nix, enables `nix-command flakes`, optionally
+- **CI** (`.github/workflows/ci.yml`) runs on pushes to `main` and pull requests
+  targeting `main` (including subsequent commits), on `ubuntu-latest`.
+  Feature-branch pushes do not trigger a separate CI run. `workflow_call`
+  remains available for the tag release workflow.
+  It installs Nix, enables `nix-command flakes`, optionally
   configures Cachix, runs `nix flake check` and `nix build`, and verifies the
   resulting binary. `--no-update-lock-file` prevents CI from silently changing
   the dependency lock. Nix build logs and a failure annotation identify errors.

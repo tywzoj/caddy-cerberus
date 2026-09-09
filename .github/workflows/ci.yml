@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
+    branches: ["main"]
   workflow_call:
     secrets:
       CACHIX_AUTH_TOKEN:
