@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/ci.yml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          CADDY_VERSION: ${{ needs.build.outputs.caddy-version }}
+        shell: bash
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          ## Package
+
+          - Package release: \`$RELEASE_TAG\`
+          - Caddy version: \`$CADDY_VERSION\` with Cerberus
+          - Supported system: \`x86_64-linux\`
+
+          ## Install this release
+
+          \`\`\`bash
+          nix profile install github:$GH_REPO/$RELEASE_TAG
+          caddy version
+          caddy list-modules | grep -i cerberus
+          \`\`\`
+
+          CI checked the locked flake, reported Caddy version, exact Caddy/Cerberus
+          dependency versions via caddy build-info, the Cerberus app module,
+          and both Cerberus HTTP handlers.
+          The package is published to Cachix when configured; otherwise Nix builds
+          it locally. No Nix store closure is attached to this release.
+          See README.md at this tag for cache setup and deployment instructions.
+          EOF
+          gh release create "$RELEASE_TAG" --verify-tag \
+            --title "$RELEASE_TAG" --notes-file "$notes"
