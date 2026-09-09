@@ -45,9 +45,12 @@ jobs:
 
           CI checked the locked flake, reported Caddy version, exact Caddy/Cerberus
           dependency versions via caddy build-info, the Cerberus app module,
-          and both Cerberus HTTP handlers.
+          and both Cerberus HTTP handlers. HTTP smoke tests checked challenge
+          interception, embedded CSS, rejected verification requests, and health.
           The package is published to Cachix when configured; otherwise Nix builds
-          it locally. No Nix store closure is attached to this release.
+          it locally. Successful cache publication is followed by a clean-runner,
+          download-only check without cache credentials.
+          No Nix store closure is attached to this release.
           See README.md at this tag for cache setup and deployment instructions.
           EOF
           gh release create "$RELEASE_TAG" --verify-tag \

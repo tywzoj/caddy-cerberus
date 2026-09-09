@@ -1,0 +1,28 @@
+{
+	admin off
+
+	cerberus {
+		max_mem_usage "16MiB"
+	}
+}
+
+http://127.0.0.1:18080 {
+	bind 127.0.0.1
+
+	handle_path /.cerberus/* {
+		cerberus_endpoint
+	}
+
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle {
+		route {
+			cerberus {
+				base_url "/.cerberus"
+			}
+			respond "Protected origin" 200
+		}
+	}
+}
