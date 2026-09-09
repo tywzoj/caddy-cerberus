@@ -43,7 +43,9 @@ jobs:
           caddy list-modules | grep -i cerberus
           \`\`\`
 
-          CI checked the locked flake, Caddy version, and Cerberus HTTP handler.
+          CI checked the locked flake, reported Caddy version, exact Caddy/Cerberus
+          dependency versions via caddy build-info, the Cerberus app module,
+          and both Cerberus HTTP handlers.
           The package is published to Cachix when configured; otherwise Nix builds
           it locally. No Nix store closure is attached to this release.
           See README.md at this tag for cache setup and deployment instructions.

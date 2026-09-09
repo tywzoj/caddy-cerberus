@@ -44,6 +44,7 @@
 
         caddy list-modules > modules
         grep -i cerberus modules
+        grep -Fx 'cerberus' modules
         grep -Fx 'http.handlers.cerberus' modules
         grep -Fx 'http.handlers.cerberus_endpoint' modules
         touch "$out"
