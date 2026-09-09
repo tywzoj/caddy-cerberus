@@ -10,11 +10,98 @@ permissions:
 jobs:
   build:
     uses: ./.github/workflows/ci.yml
-    secrets:
-      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  publish-cache:
+    needs: build
+    if: vars.CACHIX_CACHE != ''
+    runs-on: ubuntu-latest
+    outputs:
+      cache-published: ${{ steps.publish.outputs.cache-published }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure public cache without credentials
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          skipPush: true
+
+      - name: Realise the validated release package
+        env:
+          PACKAGE_PATH: ${{ needs.build.outputs.package-path }}
+        run: |
+          nix build --no-update-lock-file --print-build-logs
+          test "$(readlink -f result)" = "$PACKAGE_PATH"
+
+      - name: Publish validated package to optional Cachix cache
+        id: publish
+        env:
+          CACHIX_CACHE: ${{ vars.CACHIX_CACHE }}
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          PACKAGE_PATH: ${{ needs.build.outputs.package-path }}
+        run: |
+          if [[ -n "$CACHIX_AUTH_TOKEN" ]]; then
+            cachix push "$CACHIX_CACHE" "$PACKAGE_PATH"
+            echo "cache-published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No CACHIX_AUTH_TOKEN configured; skipping cache publication."
+          fi
+
+  verify-cache:
+    needs: [build, publish-cache]
+    if: needs.publish-cache.outputs.cache-published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure public cache without credentials
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          skipPush: true
+
+      - name: Download and verify the published package without building
+        env:
+          PACKAGE_PATH: ${{ needs.build.outputs.package-path }}
+          EXPECTED_CADDY_VERSION: ${{ needs.build.outputs.caddy-version }}
+        shell: bash
+        run: |
+          test ! -e "$PACKAGE_PATH"
+          nix-store --realise "$PACKAGE_PATH" \
+            --option max-jobs 0 --option builders "" --option fallback false
+          nix-store --verify-path "$PACKAGE_PATH"
+          version="$("$PACKAGE_PATH/bin/caddy" version)"
+          reported="${version%% *}"
+          test "${reported#v}" = "$EXPECTED_CADDY_VERSION"
+          "$PACKAGE_PATH/bin/caddy" list-modules > "$RUNNER_TEMP/modules"
+          grep -Fx 'cerberus' "$RUNNER_TEMP/modules"
+          grep -Fx 'http.handlers.cerberus' "$RUNNER_TEMP/modules"
+          grep -Fx 'http.handlers.cerberus_endpoint' "$RUNNER_TEMP/modules"
 
   release:
-    needs: build
+    needs: [build, publish-cache, verify-cache]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.build.result == 'success' &&
+        (needs.publish-cache.result == 'success' || needs.publish-cache.result == 'skipped') &&
+        (needs.verify-cache.result == 'success' ||
+          (needs.verify-cache.result == 'skipped' && needs.publish-cache.outputs.cache-published != 'true'))
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -45,9 +132,12 @@ jobs:
 
           CI checked the locked flake, reported Caddy version, exact Caddy/Cerberus
           dependency versions via caddy build-info, the Cerberus app module,
-          and both Cerberus HTTP handlers.
+          and both Cerberus HTTP handlers. HTTP smoke tests checked challenge
+          interception, embedded CSS, rejected verification requests, and health.
           The package is published to Cachix when configured; otherwise Nix builds
-          it locally. No Nix store closure is attached to this release.
+          it locally. Successful cache publication is followed by a clean-runner,
+          download-only check without cache credentials.
+          No Nix store closure is attached to this release.
           See README.md at this tag for cache setup and deployment instructions.
           EOF
           gh release create "$RELEASE_TAG" --verify-tag \

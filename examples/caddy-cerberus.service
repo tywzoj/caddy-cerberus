@@ -1,0 +1,39 @@
+[Unit]
+Description=Caddy with Cerberus proof-of-work protection
+Documentation=https://github.com/tywzoj/caddy-cerberus
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+StateDirectory=caddy-cerberus
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/caddy-cerberus
+Environment=HOME=/var/lib/caddy-cerberus
+Environment=XDG_DATA_HOME=/var/lib/caddy-cerberus/data
+Environment=XDG_CONFIG_HOME=/var/lib/caddy-cerberus/config
+ExecStartPre=/nix/var/nix/profiles/caddy-cerberus/bin/caddy validate --config /etc/caddy-cerberus/Caddyfile --adapter caddyfile
+ExecStart=/nix/var/nix/profiles/caddy-cerberus/bin/caddy run --config /etc/caddy-cerberus/Caddyfile --adapter caddyfile
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
