@@ -75,13 +75,13 @@ On an `x86_64-linux` server with Nix and flakes enabled, first
 [configure the binary cache](#binary-cache), then install:
 
 ```bash
-nix profile install github:<OWNER>/caddy-cerberus
+nix profile install github:tywzoj/caddy-cerberus
 caddy version
 caddy list-modules | grep -i cerberus
 ```
 
-Replace `<OWNER>` with `tywzoj`, or the owner of your fork. On newer Nix
-versions, `nix profile add` is the preferred spelling of `nix profile install`.
+On newer Nix versions, `nix profile add` is the preferred spelling of
+`nix profile install`.
 Ensure the installing user's Nix profile `bin` directory is on `PATH`; use
 `command -v caddy` to confirm that an older system installation is not selected.
 Remove any conflicting plain Caddy package from that profile first.
