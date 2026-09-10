@@ -25,7 +25,8 @@ Install Nix and enable flakes in `~/.config/nix/nix.conf` (or `/etc/nix/nix.conf
 experimental-features = nix-command flakes
 ```
 
-From this repository:
+To download prebuilt packages when available, first [configure the binary cache](#binary-cache).
+Then, from this repository:
 
 ```bash
 nix flake check
@@ -70,7 +71,8 @@ Run just this check with `nix build .#checks.x86_64-linux.runtime`.
 
 ## Production installation
 
-On an `x86_64-linux` server with Nix and flakes enabled:
+On an `x86_64-linux` server with Nix and flakes enabled, first
+[configure the binary cache](#binary-cache), then install:
 
 ```bash
 nix profile install github:<OWNER>/caddy-cerberus
@@ -198,11 +200,115 @@ Package rollback does not roll back configuration or mutable state.
 The default NixOS binary cache supplies available nixpkgs dependencies.
 No additional cache or credentials are required to build.
 
-To enable an optional **public Cachix cache**:
+This project's **public Cachix cache** is:
 
-1. Create a cache at Cachix.
-2. Set the GitHub repository Actions variable `CACHIX_CACHE` to its name.
+| Setting | Value |
+| --- | --- |
+| Cache name | `tywzoj` |
+| Substituter URL | `https://tywzoj.cachix.org` |
+| Public signing key | `tywzoj.cachix.org-1:W+1zbbfBudY0Xi8jbmtHoA1mRn6oVsNYtxbmt2IfWns=` |
+
+Downloading from this cache needs **no Cachix account or token**. The public key
+verifies downloaded packages; it is not a secret. Configuring the cache does not
+guarantee that every revision has been published.
+
+### Configure Nix to use the cache
+
+For **multi-user Nix on non-NixOS systems**, an administrator should add these
+settings to `/etc/nix/nix.conf`:
+
+```ini
+extra-substituters = https://tywzoj.cachix.org
+extra-trusted-public-keys = tywzoj.cachix.org-1:W+1zbbfBudY0Xi8jbmtHoA1mRn6oVsNYtxbmt2IfWns=
+```
+
+Merge with any existing `extra-*` entries. These settings retain the default
+`https://cache.nixos.org` substituter and its trusted key; do not replace them.
+Keep signature checking enabled. On a systemd host, apply the change with:
+
+```bash
+sudo systemctl restart nix-daemon.service
+```
+
+On other multi-user hosts, restart the Nix daemon using the host's service manager.
+A normal user's `~/.config/nix/nix.conf` alone is not sufficient to authorize a
+new cache/key for a shared daemon: configure it as an administrator rather than
+adding users to `trusted-users`.
+
+For **single-user Nix**, put the same settings in `~/.config/nix/nix.conf`
+(or `$XDG_CONFIG_HOME/nix/nix.conf` if set); no daemon restart is needed.
+If Cachix is already installed, `cachix use tywzoj` is an alternative; on
+multi-user installations, ensure its changes apply to the daemon configuration.
+
+For **NixOS**, add the cache declaratively to your system configuration instead
+of editing the generated `/etc/nix/nix.conf`:
+
+```nix
+nix.settings = {
+  extra-substituters = [ "https://tywzoj.cachix.org" ];
+  extra-trusted-public-keys = [
+    "tywzoj.cachix.org-1:W+1zbbfBudY0Xi8jbmtHoA1mRn6oVsNYtxbmt2IfWns="
+  ];
+};
+```
+
+Apply it with your usual `sudo nixos-rebuild switch` command.
+Never install a cache signing private key or write token on a consumer/production
+server. Private caches additionally need read-only authentication and are not
+covered by this public-cache setup.
+
+### Verify cache use and avoid unexpected builds
+
+1. Use `x86_64-linux` and an actual reviewed release tag or full commit whose
+   Release workflow completed **both `publish-cache` and `verify-cache`**.
+   Ordinary branch CI does not publish packages, and a GitHub Release whose
+   cache jobs were skipped is not proof of cache availability.
+2. Keep that revision's `flake.lock`, nixpkgs pin, plugin versions and build
+   settings unchanged. Different derivations can have different store paths
+   and miss the cache; do not override inputs or update the lock for installation.
+3. Check the effective client settings with `nix config show` (`nix show-config`
+   on older Nix): `substituters` must include the URL above,
+   `trusted-public-keys` must include the exact key above, and `substitute`
+   must be `true`. For multi-user Nix, also check the daemon's system
+   configuration and restart it after changes; client output alone does not
+   establish what the daemon trusts. If installing with `sudo`, check settings
+   under `sudo` too, since root does not use your user's configuration.
+4. Preview and then install the same revision with all builders disabled:
+
+   ```bash
+   REV='<reviewed-tag-or-full-commit>'
+   nix build "github:tywzoj/caddy-cerberus/$REV" --no-update-lock-file --dry-run
+   nix build "github:tywzoj/caddy-cerberus/$REV" --no-update-lock-file \
+     --option max-jobs 0 --option builders "" --option fallback false
+   ```
+
+On a clean store, the preview should list paths to fetch rather than a local
+Caddy build, and the actual download log should show the custom package being
+copied from `https://tywzoj.cachix.org`. Dependencies may come from
+`cache.nixos.org`. The second command fails on a cache miss instead of compiling
+locally or remotely. Already-present store paths are reused: success with no
+download is **not** evidence of a cache hit; use a fresh test host/store to verify
+downloads without deleting an existing deployment.
+
+If Nix plans to build or reports a cache miss, check the exact revision and
+successful cache publication first, then the URL, public key, daemon restart,
+and network access. Warnings about an untrusted substituter or missing trusted
+signature indicate configuration/trust problems; do not disable signature
+verification to bypass them. Nix may temporarily cache a previous miss; after
+publication, retry with `--option narinfo-cache-negative-ttl 0` if needed.
+Evaluation may still download flake sources even for a download-only install.
+
+### Maintainer setup and publication
+
+Consumers only need the configuration above, not GitHub Actions secrets.
+To enable publication to this project's cache:
+
+1. Ensure the Cachix cache `tywzoj` exists and is public (forks can use their own cache).
+2. Set the GitHub repository Actions variable `CACHIX_CACHE` to `tywzoj`.
 3. Set the Actions secret `CACHIX_AUTH_TOKEN` to a cache-scoped write token.
+
+For a fork's own cache, replace the name, URL and public key throughout the
+configuration with that cache's values.
 
 CI only builds and validates: it can pull from the configured public cache
 without a token, but never receives cache write credentials or publishes,
@@ -224,20 +330,6 @@ binary's version/module checks. A missing closure or download failure blocks
 release creation. If publication is skipped, this job is also skipped and the
 GitHub Release can still be created: that is **not** proof that the package is
 available from a cache.
-
-Configure production Nix with the cache's URL and **public** signing key from
-the Cachix dashboard, retaining the default substituter/key:
-
-```ini
-extra-substituters = https://<CACHE>.cachix.org
-extra-trusted-public-keys = <CACHE>.cachix.org-1:<PUBLIC-KEY>
-```
-
-For multi-user Nix, an administrator should put this in `/etc/nix/nix.conf`
-and restart the Nix daemon. `cachix use <CACHE>` is an alternative if Cachix
-is installed. Never install a cache signing private key or write token on the
-production server. Private caches additionally need read-only authentication
-and are not covered by this public-cache setup.
 
 ```text
 PR / main push -> CI -> build + checks (read-only cache access)
