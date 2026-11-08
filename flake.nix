@@ -15,7 +15,7 @@
           "Review the Caddy version before updating nixpkgs.";
         pkgs.caddy.withPlugins {
           plugins = [ "github.com/sjtug/cerberus@${cerberusVersion}" ];
-          hash = pkgs.lib.fakeHash;
+          hash = "sha256-9DfWN6AU3zfa6I2oHJgRvo7SpO3rqTzKM09pMBqA70Y=";
         };
     in
     {
