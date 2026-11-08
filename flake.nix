@@ -1,21 +1,21 @@
 {
-  description = "Caddy 2.11.4 with the Cerberus plugin for x86_64-linux";
+  description = "Caddy 2.11.9 with the Cerberus plugin for x86_64-linux";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/e7e7984e947e6f41ceae21727cd74aa5fa269648";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/4fe25e12eb9f4c744966dd3de5a05246cf098601";
 
   outputs =
     { nixpkgs, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
-      expectedCaddyVersion = "2.11.4";
-      cerberusVersion = "v0.4.8";
+      expectedCaddyVersion = "2.11.9";
+      cerberusVersion = "v0.4.9";
       caddy-cerberus =
         assert pkgs.lib.assertMsg (pkgs.caddy.version == expectedCaddyVersion)
           "Review the Caddy version before updating nixpkgs.";
         pkgs.caddy.withPlugins {
           plugins = [ "github.com/sjtug/cerberus@${cerberusVersion}" ];
-          hash = "sha256-rl4DBin/m3jxgi9da6bwp+0gBf2S5x7So3sCxvPsw8w=";
+          hash = pkgs.lib.fakeHash;
         };
     in
     {

@@ -7,12 +7,12 @@ nixpkgs: no nixpkgs fork, custom Caddy derivation, or runtime `caddy add-package
 | Component | Pin |
 | --- | --- |
 | Supported system | `x86_64-linux` |
-| Caddy | `2.11.4` |
-| Cerberus | `v0.4.8` |
-| nixpkgs | `e7e7984e947e6f41ceae21727cd74aa5fa269648` |
+| Caddy | `2.11.9` |
+| Cerberus | `v0.4.9` |
+| nixpkgs | `4fe25e12eb9f4c744966dd3de5a05246cf098601` |
 
 The Go module uses the canonical lowercase path
-`github.com/sjtug/cerberus@v0.4.8`, even though the organization is styled SJTUG.
+`github.com/sjtug/cerberus@v0.4.9`, even though the organization is styled SJTUG.
 This release includes its generated web assets; no frontend build is needed.
 Both `packages.x86_64-linux.caddy-cerberus` and the default package provide the
 custom `caddy` executable.
@@ -36,8 +36,8 @@ nix build
 ```
 
 The named package can also be built with `nix build .#caddy-cerberus`.
-The version must report Caddy **2.11.4**. nixpkgs supplies a custom version
-prefix, so the output can start with `2.11.4 v2.11.4`.
+The version must report Caddy **2.11.9**. nixpkgs supplies a custom version
+prefix, so the output can start with `v2.11.9 v2.11.9`.
 Module output must include:
 
 ```text
@@ -61,7 +61,7 @@ The additional `checks.x86_64-linux.runtime` check validates and starts
 - An empty verification POST is rejected with HTTP 400 and `FAIL`, without an
   approval cookie; using GET on the verification endpoint returns HTTP 404.
 
-Cerberus v0.4.8 returns **HTTP 200** for a challenge, so checking only the status
+Cerberus v0.4.9 returns **HTTP 200** for a challenge, so checking only the status
 code is insufficient. This smoke test does not solve proof-of-work or exercise
 browser JavaScript; the successful approval flow is part of the deployment
 rehearsal below. It uses temporary state, bounded requests, and process cleanup;
@@ -90,15 +90,15 @@ For reproducible deployments, select a reviewed release tag or full commit
 rather than implicitly following the default branch:
 
 ```bash
-nix profile install github:tywzoj/caddy-cerberus/v1.0.0
+nix profile install github:tywzoj/caddy-cerberus/v1.0.1
 ```
 
-`v1.0.0` is an example: use a tag that has actually been published.
+`v1.0.1` is an example: use a tag that has actually been published.
 Profile installation does not create or restart a system service. Point your
 existing service at the chosen profile's `bin/caddy`, preserve its state/data
 directories, and restart it deliberately after validating your Caddyfile.
 Cerberus is compiled in but not enabled automatically; configure its endpoint
-and middleware following the [pinned upstream example](https://github.com/SJTUG/cerberus/blob/v0.4.8/Caddyfile).
+and middleware following the [pinned upstream example](https://github.com/SJTUG/cerberus/blob/v0.4.9/Caddyfile).
 
 The server does not need Go, Node.js, or xcaddy installed, and must not use
 `caddy add-package` or `caddy upgrade` to modify the immutable Nix binary.
