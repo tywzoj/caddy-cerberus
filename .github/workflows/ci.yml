@@ -31,6 +31,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test upstream release versioning
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
