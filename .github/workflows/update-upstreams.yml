@@ -1,0 +1,78 @@
+name: Update upstreams
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-upstreams
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Configure optional read-only cache
+        if: vars.CACHIX_CACHE != ''
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          skipPush: true
+
+      - name: Test updater
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Prepare and validate upstream update
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/update_upstreams.py
+
+      - name: Commit and atomically push the update and release tag
+        if: steps.update.outputs.changed == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.update.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add flake.nix flake.lock README.md
+          git diff --cached --exit-code && { echo "::error::No dependency changes staged"; exit 1; }
+          git commit -m "chore: update upstreams for $RELEASE_TAG"
+          git tag "$RELEASE_TAG"
+          # A concurrent main update or tag collision rejects the entire push.
+          gh auth setup-git
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_TAG"
+
+      - name: Dispatch the tag release (also retries unpublished tags)
+        if: steps.update.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.update.outputs.tag }}
+        run: gh workflow run release.yml --ref "$RELEASE_TAG"
+
+      - name: Report failure
+        if: failure()
+        run: echo "::error::Upstream update failed; nothing unvalidated is published. Inspect the logs and retry."

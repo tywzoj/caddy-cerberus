@@ -4,15 +4,21 @@ A standalone Nix flake for Caddy with the [SJTUG Cerberus](https://github.com/SJ
 proof-of-work protection plugin. It consumes **`pkgs.caddy.withPlugins`** from
 nixpkgs: no nixpkgs fork, custom Caddy derivation, or runtime `caddy add-package`.
 
+<!-- BEGIN GENERATED PINS -->
 | Component | Pin |
 | --- | --- |
+| Package release | `v1.0.1` |
 | Supported system | `x86_64-linux` |
 | Caddy | `2.11.9` |
 | Cerberus | `v0.4.9` |
 | nixpkgs | `4fe25e12eb9f4c744966dd3de5a05246cf098601` |
 
+[cerberus-example]: https://github.com/SJTUG/cerberus/blob/v0.4.9/Caddyfile
+<!-- END GENERATED PINS -->
+
 The Go module uses the canonical lowercase path
-`github.com/sjtug/cerberus@v0.4.9`, even though the organization is styled SJTUG.
+`github.com/sjtug/cerberus` at the version pinned above, even though the
+organization is styled SJTUG.
 This release includes its generated web assets; no frontend build is needed.
 Both `packages.x86_64-linux.caddy-cerberus` and the default package provide the
 custom `caddy` executable.
@@ -36,8 +42,8 @@ nix build
 ```
 
 The named package can also be built with `nix build .#caddy-cerberus`.
-The version must report Caddy **2.11.9**. nixpkgs supplies a custom version
-prefix, so the output can start with `v2.11.9 v2.11.9`.
+The version must match the Caddy pin in the table above. nixpkgs supplies a
+custom version prefix, so the version may appear twice, with an optional `v`.
 Module output must include:
 
 ```text
@@ -61,7 +67,7 @@ The additional `checks.x86_64-linux.runtime` check validates and starts
 - An empty verification POST is rejected with HTTP 400 and `FAIL`, without an
   approval cookie; using GET on the verification endpoint returns HTTP 404.
 
-Cerberus v0.4.9 returns **HTTP 200** for a challenge, so checking only the status
+The pinned Cerberus returns **HTTP 200** for a challenge, so checking only the status
 code is insufficient. This smoke test does not solve proof-of-work or exercise
 browser JavaScript; the successful approval flow is part of the deployment
 rehearsal below. It uses temporary state, bounded requests, and process cleanup;
@@ -89,16 +95,20 @@ Remove any conflicting plain Caddy package from that profile first.
 For reproducible deployments, select a reviewed release tag or full commit
 rather than implicitly following the default branch:
 
+<!-- BEGIN GENERATED INSTALL -->
 ```bash
 nix profile install github:tywzoj/caddy-cerberus/v1.0.1
 ```
+<!-- END GENERATED INSTALL -->
 
-`v1.0.1` is an example: use a tag that has actually been published.
+The command tracks the package release in the table above. Before deploying,
+confirm that its Release workflow has completed; an update commit can appear
+on `main` before publication finishes.
 Profile installation does not create or restart a system service. Point your
 existing service at the chosen profile's `bin/caddy`, preserve its state/data
 directories, and restart it deliberately after validating your Caddyfile.
 Cerberus is compiled in but not enabled automatically; configure its endpoint
-and middleware following the [pinned upstream example](https://github.com/SJTUG/cerberus/blob/v0.4.9/Caddyfile).
+and middleware following the [pinned upstream example][cerberus-example].
 
 The server does not need Go, Node.js, or xcaddy installed, and must not use
 `caddy add-package` or `caddy upgrade` to modify the immutable Nix binary.
@@ -312,7 +322,7 @@ configuration with that cache's values.
 
 CI only builds and validates: it can pull from the configured public cache
 without a token, but never receives cache write credentials or publishes,
-including on pushes to `main` and when called by Release. Only the tag-triggered
+including on pushes to `main` and when called by Release. Only the tag-scoped
 **Release** workflow publishes, and only **after validation succeeds**. Its
 dedicated `publish-cache` job realises the same package from the tagged commit
 and checks its output path against CI's validated output before pushing. The
@@ -353,14 +363,81 @@ GitHub Actions artifacts or release assets.
   credentials. `--no-update-lock-file` prevents CI from silently changing
   the dependency lock. Nix build logs and a failure annotation identify errors.
 - **Release** (`.github/workflows/release.yml`) runs for tags matching
-  `v*.*.*`, such as `v1.0.0`. It calls CI for validation without passing secrets,
+  `v*.*.*`, such as `v1.0.0`, or via `workflow_dispatch` on a release tag
+  (branch dispatches cannot publish). It calls CI for validation without passing secrets,
   then runs its own optional cache publication and download verification jobs.
   Finally it creates a GitHub Release containing the
   package release version, Caddy version, supported system, and installation
   command. A failed build/check/cache push/download verification prevents release creation.
-  No tags need to be created until releases are wanted.
+  Manual releases can still be started by pushing a tag.
+- **Update upstreams** (`.github/workflows/update-upstreams.yml`) checks stable
+  Caddy and Cerberus tags daily at **03:23 UTC (11:23 China Standard Time)**,
+  and supports manual runs on `main`. See the automatic update policy below.
 - Actions are pinned to commit SHAs. Build jobs have read-only repository
-  permissions; only the release publishing job has `contents: write`.
+  permissions. The release publishing job and the updater have `contents: write`;
+  the updater also has `actions: write` to dispatch Release.
+
+### Automatic upstream updates
+
+The updater checks all upstream tags, compares versions numerically, and ignores
+prereleases and non-SemVer tags. This also supports Cerberus releases that have
+only Git tags, without a GitHub Release. Unchanged or older upstream versions do
+not cause a commit or release.
+
+The package version advances **once by the largest change level** across both
+dependencies, relative to the previous package tag: major > minor > patch.
+Less significant components are reset to zero, including for upstream `0.x`
+versions. For example:
+
+| Caddy update | Cerberus update | Package update |
+| --- | --- | --- |
+| `2.9.0 -> 2.10.0` | `0.1.0 -> 0.1.1` | `v1.0.1 -> v1.1.0` |
+| unchanged | `0.1.0 -> 0.1.1` | `v1.0.1 -> v1.0.2` |
+| `2.9.0 -> 3.0.0` | `0.1.0 -> 0.2.0` | `v1.0.1 -> v2.0.0` |
+
+For Caddy updates, the updater pins the current nixpkgs `master` commit only
+when its Caddy package matches the upstream stable version, then regenerates
+`flake.lock`. If nixpkgs has not packaged that version yet, the run fails with
+an explicit message and retries on the next schedule; it does not bypass the
+version assertion or introduce a custom Caddy derivation. Cerberus-only updates
+keep the nixpkgs pin. Both paths regenerate the vendored plugin source hash,
+update this README's pins, and run `nix flake check` and `nix build`, preserving
+the exact build-info, handler and runtime checks.
+
+The `GENERATED PINS` and `GENERATED INSTALL` comment markers delimit the
+README sections maintained by `scripts/update_upstreams.py`: package and
+dependency versions, the pinned upstream example link, and the release install
+command. Keep these markers intact. The updater replaces only these sections,
+leaving historical versions and version-rule examples elsewhere unchanged.
+For manual releases, update both blocks together.
+
+Only after validation does the workflow atomically push the dependency commit
+to `main` and its new release tag. A concurrent change to `main` or a tag
+collision rejects the push rather than overwriting work. The updater has no
+cache write token. It explicitly dispatches Release **at that tag**, because
+tag pushes made with `GITHUB_TOKEN` do not trigger another push workflow.
+Release repeats CI validation and remains the only cache publisher.
+
+Setup: merge these workflows into `main`, enable Actions, and allow the
+repository's `GITHUB_TOKEN` to write contents and dispatch workflows. Branch
+rules must permit the bot's direct update to `main`; if they require pull
+requests, this direct-publish workflow fails rather than bypassing them. No
+personal access token is required. An initial published stable `vX.Y.Z` tag
+reachable from `main` is required as the version baseline (this repository
+already has one). Cache secrets remain optional as described above.
+
+Runs are serialized. If a tag was pushed but its release was not published,
+the next run dispatches that existing tag before attempting further updates;
+it does not increment the version again. Release jobs are also serialized per
+tag, and an existing published release is not recreated. Failed builds, API
+requests, hash generation or publication are visible as failed Actions runs.
+The schedule does not deploy or restart production servers.
+
+Run the updater's focused tests locally with:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
 
 ### Release and deployment rehearsal
 
@@ -388,9 +465,10 @@ cannot access. Do not treat these steps as already completed:
 
 ## Reviewed upgrades
 
-Do not update dependencies automatically on production. Propose updates in a
-pull request, review the pins and generated hashes, and merge only after CI
-passes.
+Do not update dependencies automatically on production. The workflow above
+automatically publishes validated upstream updates; deployment remains an
+explicit operator decision. For manual dependency changes, propose a pull
+request, review the pins and generated hashes, and merge only after CI passes.
 
 ### Caddy / nixpkgs and `flake.lock`
 
@@ -409,7 +487,8 @@ passes.
 
 1. Choose a released tag compatible with the intended Caddy version. Check its
    `go.mod` and ensure generated templates/web assets are included.
-2. Update `cerberusVersion` in `flake.nix` and the version table above.
+2. Update `cerberusVersion` in `flake.nix` and the README's `GENERATED PINS`
+   block, including its pinned upstream example link.
 3. Temporarily set the `withPlugins` `hash` to `pkgs.lib.fakeHash`, then run
    `nix build --print-build-logs`.
 4. Nix should report a fixed-output hash mismatch for
@@ -426,9 +505,9 @@ not change `flake.lock`; all nixpkgs changes require a regenerated lock.
 
 ### Deploying an approved update
 
-After reviewing and merging an update, publish a reviewed release tag and wait
-for Release's cache publication and download verification before a download-only
-server update. Ordinary CI does not populate the cache.
+Select and review an automatically published release, or publish a reviewed tag
+for a manual update. Wait for Release's cache publication and download verification
+before a download-only server update. Ordinary CI does not populate the cache.
 Use `nix profile list` to find the installed entry.
 For an entry following the repository's default branch, explicitly run
 `nix profile upgrade <ENTRY>` when ready. A tag/commit-pinned entry does not
